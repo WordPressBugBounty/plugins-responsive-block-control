@@ -9,7 +9,7 @@ declare(strict_types=1);
  * @wordpress-plugin
  * Plugin Name:       Responsive Block Control
  * Description:       Responsive Block Control adds responsive toggles to a "Visibility" panel of the block editor to hide blocks according to screen width.
- * Version:           1.2.9
+ * Version:           1.3.1
  * Author:            Sascha Paukner
  * Author URI:        https://saschapaukner.de
  * License:           GPL-2.0+
@@ -20,250 +20,262 @@ declare(strict_types=1);
 
 namespace ResponsiveBlockControl;
 
-// Exit if accessed directly.
 use WP_Block_Type_Registry;
 
 if (!defined('ABSPATH')) {
 	exit;
 }
 
-function activate()
-{
-	$options = [];
-
-	$breakPoints = [];
-	$breakPoints['base'] = 0;
-	$breakPoints['mobile'] = 320;
-	$breakPoints['tablet'] = 740;
-	$breakPoints['desktop'] = 980;
-	$breakPoints['wide'] = 1480;
-
-	$options['breakPoints'] = $breakPoints;
-	$options['addCssToHead'] = true;
-
-	add_option('responsiveBlockControl', $options);
-}
-
-function deactivate()
-{
-	delete_option('responsiveBlockControl');
+/**
+ * Plugin activation.
+ */
+function activate(): void {
+	add_option('responsiveBlockControl', [
+		'breakPoints' => [
+			'base' => 0,
+			'mobile' => 320,
+			'tablet' => 740,
+			'desktop' => 980,
+			'wide' => 1480,
+		],
+		'addCssToHead' => true,
+	]);
 }
 
 /**
- * Loading ResponsiveBlockControl
- *
- * @return void
+ * Plugin deactivation.
  */
-function init()
-{
-	// initiate instance
-	$ResponsiveBlockControl = new ResponsiveBlockControl();
-	// call the register function
-	$ResponsiveBlockControl->register();
+function deactivate(): void {
+	delete_option('responsiveBlockControl');
 }
 
-register_activation_hook(__FILE__, 'ResponsiveBlockControl\activate');
-register_deactivation_hook(__FILE__, 'ResponsiveBlockControl\deactivate');
-add_action('plugins_loaded', 'ResponsiveBlockControl\init');
+register_activation_hook(__FILE__, __NAMESPACE__ . '\activate');
+register_deactivation_hook(__FILE__, __NAMESPACE__ . '\deactivate');
 
-class ResponsiveBlockControl
+add_action('plugins_loaded', __NAMESPACE__ . '\init');
+
+function init(): void {
+	(new ResponsiveBlockControl())->register();
+}
+
+final class ResponsiveBlockControl
 {
-
-	protected $plugin_name = 'responsive-block-control';
-
-	protected $domain = 'responsive-block-control';
-
-	protected $version = '1.2.9';
+	private string $plugin_name = 'responsive-block-control';
+	private string $version = '1.3.1';
 
 	/**
-	 * Registers our plugin with WordPress.
+	 * Allowed breakpoints.
 	 */
-	public static function register()
-	{
-		$plugin = new self();
-
-		// Actions
-		add_action('plugins_loaded', [$plugin, 'load_textdomain']);
-		add_action('wp_enqueue_scripts', [$plugin, 'load_frontend_assets']);
-		add_action('enqueue_block_assets', [$plugin, 'load_gutenberg_assets']);
-		add_filter('render_block', [$plugin, 'addClasses'], 10, 2);
-		add_action('wp_loaded', [$plugin, 'add_attributes_to_registered_blocks'], 999);
-		add_filter('rest_pre_dispatch', [$plugin, 'conditionally_remove_attributes'], 10, 3);
+	private function allowed_breakpoints(): array {
+		return ['mobile', 'tablet', 'desktop', 'wide'];
 	}
 
-	public function load_textdomain()
-	{
-		load_plugin_textdomain(
-			$this->domain,
-			false,
-			dirname(dirname(plugin_basename(__FILE__))) . '/languages/'
-		);
+	public function register(): void {
+		add_action('wp_enqueue_scripts', [$this, 'load_frontend_assets']);
+		add_action('enqueue_block_assets', [$this, 'load_gutenberg_assets']);
+		add_filter('render_block', [$this, 'add_classes'], 10, 2);
+		add_action('wp_loaded', [$this, 'register_block_attributes'], 999);
+		add_filter('rest_pre_dispatch', [$this, 'sanitize_rest_attributes'], 10, 3);
 	}
 
-	public function load_frontend_assets()
-	{
+	public function load_frontend_assets() {
 		// js
 		wp_enqueue_script(
 			$this->plugin_name,
 			plugin_dir_url(__FILE__) . 'build/js/responsive-block-control-public.js',
-			['jquery'],
+			[],
 			$this->version,
 			false
 		);
 
 		$options = get_option('responsiveBlockControl');
 
-		// add fallback in case no options are set
-		if (!$options) {
-			$options = [];
+		// fallback defaults
+		$defaults = [
+			'base' => 0,
+			'mobile' => 320,
+			'tablet' => 740,
+			'desktop' => 980,
+			'wide' => 1480,
+		];
 
-			$breakPoints = [];
-			$breakPoints['base'] = 0;
-			$breakPoints['mobile'] = 320;
-			$breakPoints['tablet'] = 740;
-			$breakPoints['desktop'] = 980;
-			$breakPoints['wide'] = 1480;
-
-			$options['breakPoints'] = $breakPoints;
-			$options['addCssToHead'] = true;
+		if (empty($options['breakPoints']) || !is_array($options['breakPoints'])) {
+			$options['breakPoints'] = $defaults;
 		}
 
-		$new_options['breakPoints'] = apply_filters('responsive_block_control_breakpoints', $options['breakPoints']);
-		$new_options['addCssToHead'] = apply_filters('responsive_block_control_addcss', $options['addCssToHead']);
-		$options = array_replace_recursive($options, $new_options);
+		// Apply filter
+		$filtered_breakpoints = (array)apply_filters(
+			'responsive_block_control_breakpoints',
+			$options['breakPoints']
+		);
 
-		wp_localize_script($this->plugin_name, 'responsiveBlockControlOptions', $options);
+		// Only allow known breakpoint names
+		$sanitized_breakpoints = [];
+		foreach ($defaults as $key => $default_value) {
+			if (isset($filtered_breakpoints[$key]) && is_numeric($filtered_breakpoints[$key])) {
+				$sanitized_breakpoints[$key] = (int)$filtered_breakpoints[$key];
+			} else {
+				// Use default if missing or invalid
+				$sanitized_breakpoints[$key] = $default_value;
+			}
+		}
+
+		$options['breakPoints'] = $sanitized_breakpoints;
+
+		// Apply addCssToHead filter and sanitize
+		$options['addCssToHead'] = (bool)apply_filters(
+			'responsive_block_control_addcss',
+			$options['addCssToHead'] ?? true
+		);
+
+		// ------------------------------
+		// Generate custom CSS based on breakpoints
+		// ------------------------------
+		$rules = apply_filters('responsive_block_control_custom_css_rules', [
+			'mobile' => 'clip: rect(1px, 1px, 1px, 1px) !important; clip-path: inset(50%) !important; height: 1px !important; width: 1px !important; margin: -1px !important; overflow: hidden !important; padding: 0 !important; position: absolute !important;',
+			'tablet' => 'clip: rect(1px, 1px, 1px, 1px) !important; clip-path: inset(50%) !important; height: 1px !important; width: 1px !important; margin: -1px !important; overflow: hidden !important; padding: 0 !important; position: absolute !important;',
+			'desktop' => 'clip: rect(1px, 1px, 1px, 1px) !important; clip-path: inset(50%) !important; height: 1px !important; width: 1px !important; margin: -1px !important; overflow: hidden !important; padding: 0 !important; position: absolute !important;',
+			'wide' => 'clip: rect(1px, 1px, 1px, 1px) !important; clip-path: inset(50%) !important; height: 1px !important; width: 1px !important; margin: -1px !important; overflow: hidden !important; padding: 0 !important; position: absolute !important;',
+		]);
+
+		$customCss = '';
+
+		$breakKeys = ['mobile', 'tablet', 'desktop', 'wide'];
+
+		foreach ($breakKeys as $index => $key) {
+			// The min is now the current breakpoint
+			$min = $options['breakPoints'][$key];
+
+			// Max is next breakpoint - 1 (except wide)
+			$max = isset($breakKeys[$index + 1]) ? $options['breakPoints'][$breakKeys[$index + 1]] - 1 : null;
+
+			if (!empty($rules[$key])) {
+				$customCss .= "@media (min-width: {$min}px)" . ($max !== null ? " and (max-width: {$max}px)" : '') . " {
+				  .rbc-is-hidden-on-{$key} {
+					{$rules[$key]}
+				  }
+				}";
+			}
+		}
+
+		$options['customCss'] = trim($customCss);
+
+		// Localize for JS
+		wp_localize_script(
+			$this->plugin_name,
+			'responsiveBlockControlOptions',
+			$options
+		);
 	}
 
-	public function load_gutenberg_assets()
-	{
-		if (is_admin()) {
-			wp_enqueue_script(
-				$this->plugin_name . '-gutenberg',
-				plugin_dir_url(__FILE__) . 'build/js/responsive-block-control-gutenberg.js',
-				[
-					'wp-blocks',
-					'wp-element',
-					'wp-editor',
-					'wp-i18n',
-				],
-				$this->version,
-				false
-			);
 
-			wp_enqueue_style(
-				$this->plugin_name . '-gutenberg',
-				plugin_dir_url(__FILE__) . 'build/css/responsive-block-control-gutenberg.css',
-			);
+	public function load_gutenberg_assets(): void {
+		if (!is_admin()) {
+			return;
 		}
+
+		wp_enqueue_script(
+			$this->plugin_name . '-gutenberg',
+			plugin_dir_url(__FILE__) . 'build/js/responsive-block-control-gutenberg.js',
+			['wp-blocks', 'wp-element', 'wp-editor', 'wp-i18n'],
+			$this->version,
+			true
+		);
+
+		wp_enqueue_style(
+			$this->plugin_name . '-gutenberg',
+			plugin_dir_url(__FILE__) . 'build/css/responsive-block-control-gutenberg.css',
+			[],
+			$this->version
+		);
 	}
 
-	// adds the classes based on $block['attrs']['responsiveBlockControl']
-	public function addClasses($block_content, $block)
-	{
-		if (!isset($block_content)) {
-			return null;
-		}
-
-		// trim the content as there seems to be whitespace
-		// needed for preg_replace() further down
-		$block_content = trim($block_content);
-
-		// do nothing if we dont have any values
-		if (!isset($block['attrs']['responsiveBlockControl'])) {
+	/**
+	 * Securely add classes to rendered blocks.
+	 */
+	public function add_classes($block_content, $block) {
+		if (!is_string($block_content)) {
 			return $block_content;
 		}
 
-		$responsiveBlockControl = $block['attrs']['responsiveBlockControl'];
+		$block_content = trim($block_content);
 
-		//
-		// add classes
-		//
-		$pattern = '/(^<[a-z]+[\d]*\s*)([^>]*)(class=")(.*?)(")([^>]*)(>)/';
-		preg_match($pattern, $block_content, $matches);
-		$existingClasses = empty($matches) ? '' : $matches[4];
-
-		// if no classes are present get <tag and closing >
-		if (empty($existingClasses)) {
-			$pattern = '/(^<[a-z]+[\d]*\s*)([^>]*)(>)/';
-			preg_match($pattern, $block_content, $matches);
+		if (
+			!isset($block['attrs']['responsiveBlockControl']) ||
+			!is_array($block['attrs']['responsiveBlockControl'])
+		) {
+			return $block_content;
 		}
 
-		$classes = $existingClasses;
-		foreach ($responsiveBlockControl as $breakpoint => $value) {
-			if ($value === true) {
-				$classes .= ' rbc-is-hidden-on-' . $breakpoint . ' ';
+		$allowed = $this->allowed_breakpoints();
+		$clean_classes = [];
+
+		foreach ($block['attrs']['responsiveBlockControl'] as $breakpoint => $value) {
+			if (
+				in_array($breakpoint, $allowed, true) &&
+				is_bool($value) &&
+				$value === true
+			) {
+				$clean_classes[] = 'rbc-is-hidden-on-' . sanitize_html_class($breakpoint);
 			}
 		}
 
-		// filter out duplicate classes
-		$classes = implode(' ', array_unique(explode(' ', $classes)));
-
-		// define replacement
-		$replacement = '$1$2$3' . trim($classes) . '$5$6$7';
-
-		// if no classes are present the replacement needs to be different
-		if (empty($existingClasses)) {
-			$replacement = '$1 class="' . trim($classes) . '" $2$3';
+		if (empty($clean_classes)) {
+			return $block_content;
 		}
 
-		// actually replace in string
-		$block_content = preg_replace($pattern, $replacement, $block_content);
+		// Use WP_HTML_Tag_Processor to add classes safely.
+		$processor = new \WP_HTML_Tag_Processor($block_content);
+		if ($processor->next_tag()) {
+			foreach ($clean_classes as $class) {
+				$processor->add_class($class);
+			}
+			return $processor->get_updated_html();
+		}
 
-		$content = $block_content;
-
-		return $content;
+		return $block_content;
 	}
 
+
 	/**
-	 * This is needed to resolve an issue with blocks that use the
-	 * ServerSideRender component. Registering the attributes only in js
-	 * can cause an error message to appear. Registering the attributes in
-	 * PHP as well, seems to resolve the issue. Ideally, this bug will be
-	 * fixed in the future.
-	 *
-	 * Reference: https://github.com/WordPress/gutenberg/issues/16850
-	 *
-	 * @since 1.0.1
+	 * Register attributes for all blocks (SSR compatibility).
 	 */
-	function add_attributes_to_registered_blocks()
-	{
+	public function register_block_attributes(): void {
+		$registry = WP_Block_Type_Registry::get_instance();
 
-		$registered_blocks = WP_Block_Type_Registry::get_instance()->get_all_registered();
-
-		foreach ($registered_blocks as $name => $block) {
-			$block->attributes['responsiveBlockControl'] = ['type' => 'object'];
+		foreach ($registry->get_all_registered() as $block) {
+			$block->attributes['responsiveBlockControl'] = [
+				'type' => 'object',
+				'default' => [
+					'mobile' => false,
+					'tablet' => false,
+					'desktop' => false,
+					'wide' => false,
+				],
+			];
 		}
 	}
 
 	/**
-	 * Fix REST API issue with blocks rendered server-side. Without this,
-	 * server-side blocks will not load in the block editor when visibility
-	 * controls have been added.
-	 *
-	 * Reference: https://github.com/phpbits/block-options/blob/f741344033a2c9455828d039881616f77ef109fe/includes/class-editorskit-post-meta.php#L82-L112
-	 *
-	 * @param mixed $result Response to replace the requested version with.
-	 * @param object $server Server instance.
-	 * @param object $request Request used to generate the response.
-	 *
-	 * @return array Returns updated results.
-	 * @since 1.0.1
-	 *
+	 * Sanitize REST attributes to prevent injection.
 	 */
-	function conditionally_remove_attributes($result, $server, $request)
-	{ // phpcs:ignore
+	public function sanitize_rest_attributes($result, $server, $request) {
+		if (
+			strpos($request->get_route(), '/wp/v2/block-renderer') === false ||
+			!isset($request['attributes']['responsiveBlockControl'])
+		) {
+			return $result;
+		}
 
-		if (strpos($request->get_route(), '/wp/v2/block-renderer') !== false) {
+		$clean = [];
 
-			if (isset($request['attributes']) && isset($request['attributes']['responsiveBlockControl'])) {
-
-				$attributes = $request['attributes'];
-				unset($attributes['responsiveBlockControl']);
-				$request['attributes'] = $attributes;
+		foreach ((array)$request['attributes']['responsiveBlockControl'] as $key => $value) {
+			if (in_array($key, $this->allowed_breakpoints(), true)) {
+				$clean[$key] = (bool)$value;
 			}
 		}
 
+		$request['attributes']['responsiveBlockControl'] = $clean;
 		return $result;
 	}
 }
