@@ -9,7 +9,7 @@ declare(strict_types=1);
  * @wordpress-plugin
  * Plugin Name:       Responsive Block Control
  * Description:       Responsive Block Control adds responsive toggles to a "Visibility" panel of the block editor to hide blocks according to screen width.
- * Version:           1.3.1
+ * Version:           1.3.2
  * Author:            Sascha Paukner
  * Author URI:        https://saschapaukner.de
  * License:           GPL-2.0+
@@ -61,7 +61,7 @@ function init(): void {
 final class ResponsiveBlockControl
 {
 	private string $plugin_name = 'responsive-block-control';
-	private string $version = '1.3.1';
+	private string $version = '1.3.2';
 
 	/**
 	 * Allowed breakpoints.

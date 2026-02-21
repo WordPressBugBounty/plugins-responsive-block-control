@@ -4,7 +4,7 @@ Donate link: https://saschapaukner.de
 Tags: block, visibility, responsive, hide content, width
 Requires at least: 5.2
 Tested up to: 6.9
-Stable tag: 1.3.1
+Stable tag: 1.3.2
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -112,6 +112,9 @@ Yes, that is absolutely possible. Just use the filter below to stop the plugin f
 1. The 'Responsive Block Control' toggles at work in the block editor.
 
 == Changelog ==
+= 1.3.2 =
+* Removed console.log
+
 = 1.3.1 =
 * Security fix: Mitigated authenticated Stored XSS (CVE‑2025‑62135).
 * Added responsive_block_control_custom_css_rules filter to allow developers to provide their own CSS per breakpoint
